@@ -1,70 +1,58 @@
 <html>
   <head>
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-    <title>CT Scan AR</title>
+    <title>CT Scan AR - Professional HUD</title>
     
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
 
     <script>
-      // 1. THE AR CONTROLLER (DOM Isolation Method)
-      AFRAME.registerComponent('ar-controller', {
+      // 1. THE AR RESCUE SYSTEM
+      AFRAME.registerComponent('ar-manager', {
         init: function () {
           this.targetEl = document.querySelector('#target');
-          this.modelEl = document.querySelector('#model-container');
+          this.cameraEl = document.querySelector('#camera');
+          this.modelEl = this.el; // The model this component is attached to
           
-          this.isFound = false;
-          this.hasScannedOnce = false;
-
-          // Keep the model completely hidden until they scan the paper
-          this.modelEl.setAttribute('visible', false);
-
+          // When the image is found
           this.targetEl.addEventListener('targetFound', () => {
-            this.isFound = true;
-            this.hasScannedOnce = true;
-            this.modelEl.setAttribute('visible', true); // Turn model on
-            
-            // Hide the scanning brackets permanently
-            if (!document.getElementById('hide-mindar-ui')) {
-              const style = document.createElement('style');
-              style.id = 'hide-mindar-ui';
-              style.innerHTML = `
-                .mindar-ui-scanning { display: none !important; }
-                .mindar-ui-overlay { display: none !important; }
-              `;
-              document.head.appendChild(style);
-            }
+            console.log("Target Found: Snapping to Paper");
+            // Move the 3D object back to the target's coordinate system
+            this.targetEl.object3D.add(this.modelEl.object3D);
+            this.modelEl.object3D.position.set(0, 0, 0);
+            this.modelEl.setAttribute('visible', true);
+
+            // Hide the scanning UI
+            const ui = document.querySelector('.mindar-ui-scanning');
+            if (ui) ui.style.display = 'none';
           });
 
+          // When the image is lost
           this.targetEl.addEventListener('targetLost', () => {
-            this.isFound = false;
+            console.log("Target Lost: Rescuing to Screen (HUD)");
+            // Move the 3D object to the Camera's coordinate system
+            this.cameraEl.object3D.add(this.modelEl.object3D);
+            
+            // Position it 1 meter in front of the screen
+            this.modelEl.object3D.position.set(0, 0, -1);
+            
+            // Force it to stay visible
+            this.modelEl.setAttribute('visible', true);
           });
         },
-        
-        // This runs 60 times a second to place the model
-        tick: function () {
-          if (!this.hasScannedOnce || !this.targetEl || !this.modelEl) return;
-
-          if (this.isFound) {
-            // IF LOOKING AT PAPER: Copy the exact coordinates of the AR target
-            this.modelEl.object3D.position.copy(this.targetEl.object3D.position);
-            this.modelEl.object3D.quaternion.copy(this.targetEl.object3D.quaternion);
-            this.modelEl.object3D.scale.copy(this.targetEl.object3D.scale);
-          } else {
-            // IF LOST: Snap the model perfectly in front of the phone screen!
-            // (MindAR's camera is always strictly at 0,0,0)
-            this.modelEl.object3D.position.set(0, 0, -1.5); 
-            this.modelEl.object3D.quaternion.identity(); // Reset rotation to face user
-            this.modelEl.object3D.scale.set(1, 1, 1);
-          }
+        // We use tick to make sure MindAR doesn't force the model to hide
+        tick: function() {
+            if (this.modelEl.object3D.parent === this.cameraEl.object3D) {
+                this.modelEl.object3D.visible = true;
+            }
         }
       });
 
-      // 2. TOUCH CONTROLS (1-Finger Rotate, 2-Finger Zoom)
+      // 2. TOUCH CONTROLS (Rotation and Zoom)
       AFRAME.registerComponent('touch-handler', {
         schema: {
           minScale: { default: 0.1 },  
-          maxScale: { default: 5.0 },  
+          maxScale: { default: 10.0 },  
           rotationFactor: { default: 5 } 
         },
         init: function () {
@@ -74,7 +62,7 @@
           this.previousTouch = null;
           this.initialDistance = null;
 
-          document.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+          document.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
 
           window.addEventListener('touchstart', this.onTouchStart.bind(this));
           window.addEventListener('touchmove', this.onTouchMove.bind(this));
@@ -93,29 +81,27 @@
           if (e.touches.length === 1 && this.isDragging) {
             let deltaX = e.touches[0].screenX - this.previousTouch.x;
             let deltaY = e.touches[0].screenY - this.previousTouch.y;
-            
             this.el.object3D.rotation.y += deltaX * 0.01 * this.data.rotationFactor;
             this.el.object3D.rotation.x += deltaY * 0.01 * this.data.rotationFactor;
-            
             this.previousTouch = { x: e.touches[0].screenX, y: e.touches[0].screenY };
           } else if (e.touches.length === 2) {
             let currentDistance = this.getDistance(e.touches);
             if (this.initialDistance) {
               let zoomFactor = currentDistance / this.initialDistance;
               this.scaleFactor *= zoomFactor;
-              
               this.scaleFactor = Math.max(this.data.minScale, Math.min(this.data.maxScale, this.scaleFactor));
-              
-              this.el.object3D.scale.x = this.initialScale.x * this.scaleFactor;
-              this.el.object3D.scale.y = this.initialScale.y * this.scaleFactor;
-              this.el.object3D.scale.z = this.initialScale.z * this.scaleFactor;
+              this.el.object3D.scale.set(
+                this.initialScale.x * this.scaleFactor,
+                this.initialScale.y * this.scaleFactor,
+                this.initialScale.z * this.scaleFactor
+              );
             }
             this.initialDistance = currentDistance;
           }
         },
-        onTouchEnd: function (e) {
-          if (e.touches.length < 2) { this.initialDistance = null; }
-          if (e.touches.length === 0) { this.isDragging = false; }
+        onTouchEnd: function () {
+          this.initialDistance = null;
+          this.isDragging = false;
         },
         getDistance: function (touches) {
           let dx = touches[0].screenX - touches[1].screenX;
@@ -127,9 +113,7 @@
   </head>
 
   <body>
-    <!-- The ar-controller is attached to the whole scene -->
     <a-scene 
-      ar-controller
       mindar-image="imageTargetSrc: ./targets.mind; filterMinCF: 0.0001; filterBeta: 0.001;" 
       color-space="sRGB" 
       renderer="colorManagement: true, physicallyCorrectLights" 
@@ -143,13 +127,14 @@
 
       <a-camera id="camera" position="0 0 0" look-controls="enabled: false"></a-camera>
 
-      <!-- 1. The AR Target is now completely empty! -->
-      <a-entity id="target" mindar-image-target="targetIndex: 0"></a-entity>
-      
-      <!-- 2. The Model Container is OUTSIDE of the target! -->
-      <a-entity id="model-container">
-        <!-- The actual CT scan model with the Touch Controls attached -->
-        <a-gltf-model src="#ct-scan" position="0 0 0" scale="1 1 1" touch-handler></a-gltf-model>
+      <!-- The target starts with the model inside so the initial scan is reliable -->
+      <a-entity id="target" mindar-image-target="targetIndex: 0">
+        <a-gltf-model id="model" src="#ct-scan" 
+                      position="0 0 0" 
+                      scale="0.5 0.5 0.5" 
+                      ar-manager 
+                      touch-handler>
+        </a-gltf-model>
       </a-entity>
 
     </a-scene>
