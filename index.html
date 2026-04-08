@@ -7,16 +7,24 @@
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
 
     <script>
-      // 1. THE AR CONTROLLER: Handles snapping between the Paper and the Screen
+      // 1. THE AR CONTROLLER (DOM Isolation Method)
       AFRAME.registerComponent('ar-controller', {
         init: function () {
-          const targetEl = document.querySelector('#target');
-          const cameraEl = document.querySelector('#camera');
-          const modelContainerEl = document.querySelector('#model-container');
+          this.targetEl = document.querySelector('#target');
+          this.modelEl = document.querySelector('#model-container');
+          
+          this.isFound = false;
+          this.hasScannedOnce = false;
 
-          // WHEN THE CAMERA SEES THE PAPER...
-          targetEl.addEventListener('targetFound', () => {
-            // A. Hide the scanning brackets permanently
+          // Keep the model completely hidden until they scan the paper
+          this.modelEl.setAttribute('visible', false);
+
+          this.targetEl.addEventListener('targetFound', () => {
+            this.isFound = true;
+            this.hasScannedOnce = true;
+            this.modelEl.setAttribute('visible', true); // Turn model on
+            
+            // Hide the scanning brackets permanently
             if (!document.getElementById('hide-mindar-ui')) {
               const style = document.createElement('style');
               style.id = 'hide-mindar-ui';
@@ -26,27 +34,33 @@
               `;
               document.head.appendChild(style);
             }
-            
-            // B. Attach the model back to the physical paper
-            targetEl.object3D.add(modelContainerEl.object3D);
-            modelContainerEl.object3D.position.set(0, 0, 0); 
           });
 
-          // WHEN THE CAMERA LOSES THE PAPER...
-          targetEl.addEventListener('targetLost', () => {
-            // A. Rescue the model by attaching it to the Phone Camera instead!
-            cameraEl.object3D.add(modelContainerEl.object3D);
-            
-            // B. Place it exactly 2 meters in front of the phone screen
-            modelContainerEl.object3D.position.set(0, 0, -2);
-            
-            // C. Reset its container rotation so it faces you perfectly
-            modelContainerEl.object3D.rotation.set(0, 0, 0); 
+          this.targetEl.addEventListener('targetLost', () => {
+            this.isFound = false;
           });
+        },
+        
+        // This runs 60 times a second to place the model
+        tick: function () {
+          if (!this.hasScannedOnce || !this.targetEl || !this.modelEl) return;
+
+          if (this.isFound) {
+            // IF LOOKING AT PAPER: Copy the exact coordinates of the AR target
+            this.modelEl.object3D.position.copy(this.targetEl.object3D.position);
+            this.modelEl.object3D.quaternion.copy(this.targetEl.object3D.quaternion);
+            this.modelEl.object3D.scale.copy(this.targetEl.object3D.scale);
+          } else {
+            // IF LOST: Snap the model perfectly in front of the phone screen!
+            // (MindAR's camera is always strictly at 0,0,0)
+            this.modelEl.object3D.position.set(0, 0, -1.5); 
+            this.modelEl.object3D.quaternion.identity(); // Reset rotation to face user
+            this.modelEl.object3D.scale.set(1, 1, 1);
+          }
         }
       });
 
-      // 2. TOUCH CONTROLS: 1-Finger Rotate, 2-Finger Zoom
+      // 2. TOUCH CONTROLS (1-Finger Rotate, 2-Finger Zoom)
       AFRAME.registerComponent('touch-handler', {
         schema: {
           minScale: { default: 0.1 },  
@@ -113,7 +127,7 @@
   </head>
 
   <body>
-    <!-- We added the "ar-controller" component to the main scene -->
+    <!-- The ar-controller is attached to the whole scene -->
     <a-scene 
       ar-controller
       mindar-image="imageTargetSrc: ./targets.mind; filterMinCF: 0.0001; filterBeta: 0.001;" 
@@ -127,18 +141,17 @@
         <a-asset-item id="ct-scan" src="./abed.glb"></a-asset-item>
       </a-assets>
 
-      <!-- We added the id="camera" so our script can find it -->
       <a-camera id="camera" position="0 0 0" look-controls="enabled: false"></a-camera>
 
-      <!-- We added the id="target" so our script can find it -->
-      <a-entity id="target" mindar-image-target="targetIndex: 0">
-        
-        <!-- We wrapped the model in a container. This is what moves back and forth! -->
-        <a-entity id="model-container">
-          <a-gltf-model src="#ct-scan" position="0 0 0" scale="1 1 1" touch-handler></a-gltf-model>
-        </a-entity>
-
+      <!-- 1. The AR Target is now completely empty! -->
+      <a-entity id="target" mindar-image-target="targetIndex: 0"></a-entity>
+      
+      <!-- 2. The Model Container is OUTSIDE of the target! -->
+      <a-entity id="model-container">
+        <!-- The actual CT scan model with the Touch Controls attached -->
+        <a-gltf-model src="#ct-scan" position="0 0 0" scale="1 1 1" touch-handler></a-gltf-model>
       </a-entity>
+
     </a-scene>
   </body>
 </html>
