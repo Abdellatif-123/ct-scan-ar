@@ -1,65 +1,46 @@
 <html>
   <head>
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-    <title>CT Scan AR - World Anchor</title>
+    <title>CT Scan AR - Professional Sticky</title>
     
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
 
     <script>
-      AFRAME.registerComponent('ar-bridge', {
+      AFRAME.registerComponent('ar-handler', {
         init: function () {
           this.targetEl = document.querySelector('#target');
           this.cameraEl = document.querySelector('#camera');
           this.modelEl = this.el;
-          
-          this.isTracking = false;
-          this.hasFoundOnce = false;
+          this.isFound = false;
 
-          // Listen for MindAR events
+          // 1. When image is found: Snap model to the PAPER
           this.targetEl.addEventListener('targetFound', () => {
-            this.isTracking = true;
-            this.hasFoundOnce = true;
+            this.isFound = true;
+            this.targetEl.object3D.add(this.modelEl.object3D);
+            this.modelEl.object3D.position.set(0, 0, 0);
+            this.modelEl.object3D.rotation.set(0, 0, 0);
             this.modelEl.setAttribute('visible', true);
-            
-            // Hide the scanning UI
-            const ui = document.querySelector('.mindar-ui-scanning');
-            if (ui) ui.style.display = 'none';
+            console.log("Found: Attached to Target");
           });
 
+          // 2. When image is lost: Snap model to the PHONE SCREEN
           this.targetEl.addEventListener('targetLost', () => {
-            this.isTracking = false;
+            this.isFound = false;
+            this.cameraEl.object3D.add(this.modelEl.object3D);
+            this.modelEl.object3D.position.set(0, 0, -1); // 1 meter in front
+            this.modelEl.object3D.rotation.set(0, 0, 0);
+            this.modelEl.setAttribute('visible', true);
+            console.log("Lost: Rescued to Camera");
           });
         },
-
-        tick: function () {
-          if (!this.hasFoundOnce) return;
-
-          // Variables to hold world positions
-          const targetWorldPos = new THREE.Vector3();
-          const targetWorldQuat = new THREE.Quaternion();
-          const targetWorldScale = new THREE.Vector3();
-
-          if (this.isTracking) {
-            // 1. STICK TO PAPER: Copy Paper's World Position
-            this.targetEl.object3D.getWorldPosition(targetWorldPos);
-            this.targetEl.object3D.getWorldQuaternion(targetWorldQuat);
-            this.targetEl.object3D.getWorldScale(targetWorldScale);
-
-            this.modelEl.object3D.position.copy(targetWorldPos);
-            this.modelEl.object3D.quaternion.copy(targetWorldQuat);
-            // We use a fixed scale or the target scale
-            this.modelEl.object3D.scale.set(0.5, 0.5, 0.5); 
-          } else {
-            // 2. STICK TO SCREEN: Copy Camera Position + Offset
-            // MindAR Camera is always at 0,0,0, looking down -Z
-            this.modelEl.object3D.position.set(0, 0, -1); // 1 meter in front
-            this.modelEl.object3D.rotation.set(0, 0, 0);  // Face user
-            this.modelEl.object3D.scale.set(0.5, 0.5, 0.5);
+        
+        // The "Tick" ensures MindAR doesn't try to hide the model every frame
+        tick: function() {
+          if (this.modelEl.object3D.visible === false && this.isFound === false) {
+             this.modelEl.object3D.visible = true;
+             this.modelEl.setAttribute('visible', true);
           }
-          
-          // Absolute override to ensure it never disappears
-          this.modelEl.object3D.visible = true;
         }
       });
 
@@ -68,8 +49,6 @@
         init: function () {
           this.isDragging = false;
           this.previousTouch = null;
-          this.scaleFactor = 1;
-
           document.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
           window.addEventListener('touchstart', (e) => {
             if (e.touches.length === 1) {
@@ -92,14 +71,14 @@
     </script>
     
     <style>
-        /* Extra insurance to hide MindAR overlays */
-        .mindar-ui-scanning, .mindar-ui-overlay { display: none !important; }
+      /* Hide the scanning UI so it doesn't block the model when tracking is lost */
+      .mindar-ui-scanning, .mindar-ui-overlay { display: none !important; }
     </style>
   </head>
 
   <body>
     <a-scene 
-      mindar-image="imageTargetSrc: ./targets.mind; autoStart: true; uiScanning: no;" 
+      mindar-image="imageTargetSrc: ./targets.mind; filterMinCF: 0.0001; filterBeta: 0.001; uiScanning: no;" 
       color-space="sRGB" 
       renderer="colorManagement: true, physicallyCorrectLights" 
       vr-mode-ui="enabled: false" 
@@ -112,12 +91,14 @@
 
       <a-camera id="camera" position="0 0 0" look-controls="enabled: false"></a-camera>
 
-      <!-- The target is now just an invisible reference point -->
-      <a-entity id="target" mindar-image-target="targetIndex: 0"></a-entity>
-
-      <!-- The model is OUTSIDE the target, attached directly to the scene -->
-      <a-entity id="model-anchor" ar-bridge visible="false">
-        <a-gltf-model src="#ct-scan" touch-handler></a-gltf-model>
+      <!-- Model starts INSIDE the target so it's visible on first scan -->
+      <a-entity id="target" mindar-image-target="targetIndex: 0">
+        <a-gltf-model id="myModel" src="#ct-scan" 
+                      position="0 0 0" 
+                      scale="1 1 1" 
+                      ar-handler 
+                      touch-handler>
+        </a-gltf-model>
       </a-entity>
 
     </a-scene>
