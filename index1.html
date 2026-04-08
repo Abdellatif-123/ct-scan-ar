@@ -1,0 +1,132 @@
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>CT Scan AR - Professional Sticky</title>
+    
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
+
+    <script>
+      AFRAME.registerComponent('ar-bridge', {
+        init: function () {
+          this.targetEl = document.querySelector('#target');
+          this.cameraEl = document.querySelector('#camera');
+          this.modelWrapper = document.querySelector('#model-wrapper');
+          
+          this.isTracking = false;
+          this.hasFoundOnce = false;
+
+          // Helper vectors to save memory
+          this.targetPos = new THREE.Vector3();
+          this.targetQuat = new THREE.Quaternion();
+          this.targetScale = new THREE.Vector3();
+
+          this.targetEl.addEventListener('targetFound', () => {
+            this.isTracking = true;
+            this.hasFoundOnce = true;
+            this.modelWrapper.setAttribute('visible', true);
+            // Hide Scanning UI
+            document.querySelector('.mindar-ui-scanning').style.display = 'none';
+          });
+
+          this.targetEl.addEventListener('targetLost', () => {
+            this.isTracking = false;
+          });
+        },
+
+        tick: function () {
+          if (!this.hasFoundOnce) return;
+
+          if (this.isTracking) {
+            // CASE 1: SNAP TO PAPER
+            // We get the world position of the invisible tracker
+            this.targetEl.object3D.getWorldPosition(this.targetPos);
+            this.targetEl.object3D.getWorldQuaternion(this.targetQuat);
+            this.targetEl.object3D.getWorldScale(this.targetScale);
+
+            // Apply it to our model wrapper
+            this.modelWrapper.object3D.position.copy(this.targetPos);
+            this.modelWrapper.object3D.quaternion.copy(this.targetQuat);
+          } else {
+            // CASE 2: SNAP TO SCREEN (HUD)
+            // We place it relative to the camera (which is at 0,0,0 in MindAR)
+            this.modelWrapper.object3D.position.set(0, 0, -1); // 1 meter away
+            this.modelWrapper.object3D.rotation.set(0, 0, 0);  // Face forward
+          }
+          
+          // Force visibility TRUE every single frame to fight MindAR
+          this.modelWrapper.object3D.visible = true;
+        }
+      });
+
+      AFRAME.registerComponent('touch-handler', {
+        init: function () {
+          this.isDragging = false;
+          this.previousTouch = null;
+          this.scaleFactor = 1;
+          this.initialScale = this.el.object3D.scale.clone();
+
+          document.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
+
+          window.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+              this.isDragging = true;
+              this.previousTouch = { x: e.touches[0].screenX, y: e.touches[0].screenY };
+            }
+          });
+
+          window.addEventListener('touchmove', (e) => {
+            if (this.isDragging && e.touches.length === 1) {
+              let deltaX = e.touches[0].screenX - this.previousTouch.x;
+              let deltaY = e.touches[0].screenY - this.previousTouch.y;
+              this.el.object3D.rotation.y += deltaX * 0.01;
+              this.el.object3D.rotation.x += deltaY * 0.01;
+              this.previousTouch = { x: e.touches[0].screenX, y: e.touches[0].screenY };
+            }
+            if (e.touches.length === 2) {
+                // Simplified zoom logic
+                this.el.object3D.scale.multiplyScalar(1.01); 
+            }
+          });
+
+          window.addEventListener('touchend', () => { this.isDragging = false; });
+        }
+      });
+    </script>
+
+    <style>
+      .mindar-ui-scanning, .mindar-ui-overlay { display: none !important; }
+      body { margin: 0; overflow: hidden; }
+    </style>
+  </head>
+
+  <body>
+    <a-scene 
+      ar-bridge
+      mindar-image="imageTargetSrc: ./targets.mind; autoStart: true; uiScanning: no;" 
+      color-space="sRGB" 
+      renderer="colorManagement: true, physicallyCorrectLights" 
+      vr-mode-ui="enabled: false" 
+      device-orientation-permission-ui="enabled: false"
+      gltf-model="dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/;">
+      
+      <a-assets>
+        <a-asset-item id="ct-scan" src="./ct_model.glb"></a-asset-item>
+      </a-assets>
+
+      <a-camera id="camera" position="0 0 0" look-controls="enabled: false"></a-camera>
+
+      <!-- THE TRACKER (Invisible reference) -->
+      <a-entity id="target" mindar-image-target="targetIndex: 0"></a-entity>
+
+      <!-- THE ACTUAL MODEL (Lives outside the target) -->
+      <a-entity id="model-wrapper" visible="false">
+          <a-gltf-model src="#ct-scan" 
+                        scale="0.5 0.5 0.5" 
+                        touch-handler>
+          </a-gltf-model>
+      </a-entity>
+
+    </a-scene>
+  </body>
+</html>
