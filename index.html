@@ -1,120 +1,105 @@
 <html>
   <head>
     <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-    <title>CT Scan AR - Professional HUD</title>
+    <title>CT Scan AR - World Anchor</title>
     
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
 
     <script>
-      // 1. THE AR RESCUE SYSTEM
-      AFRAME.registerComponent('ar-manager', {
+      AFRAME.registerComponent('ar-bridge', {
         init: function () {
           this.targetEl = document.querySelector('#target');
           this.cameraEl = document.querySelector('#camera');
-          this.modelEl = this.el; // The model this component is attached to
+          this.modelEl = this.el;
           
-          // When the image is found
-          this.targetEl.addEventListener('targetFound', () => {
-            console.log("Target Found: Snapping to Paper");
-            // Move the 3D object back to the target's coordinate system
-            this.targetEl.object3D.add(this.modelEl.object3D);
-            this.modelEl.object3D.position.set(0, 0, 0);
-            this.modelEl.setAttribute('visible', true);
+          this.isTracking = false;
+          this.hasFoundOnce = false;
 
+          // Listen for MindAR events
+          this.targetEl.addEventListener('targetFound', () => {
+            this.isTracking = true;
+            this.hasFoundOnce = true;
+            this.modelEl.setAttribute('visible', true);
+            
             // Hide the scanning UI
             const ui = document.querySelector('.mindar-ui-scanning');
             if (ui) ui.style.display = 'none';
           });
 
-          // When the image is lost
           this.targetEl.addEventListener('targetLost', () => {
-            console.log("Target Lost: Rescuing to Screen (HUD)");
-            // Move the 3D object to the Camera's coordinate system
-            this.cameraEl.object3D.add(this.modelEl.object3D);
-            
-            // Position it 1 meter in front of the screen
-            this.modelEl.object3D.position.set(0, 0, -1);
-            
-            // Force it to stay visible
-            this.modelEl.setAttribute('visible', true);
+            this.isTracking = false;
           });
         },
-        // We use tick to make sure MindAR doesn't force the model to hide
-        tick: function() {
-            if (this.modelEl.object3D.parent === this.cameraEl.object3D) {
-                this.modelEl.object3D.visible = true;
-            }
+
+        tick: function () {
+          if (!this.hasFoundOnce) return;
+
+          // Variables to hold world positions
+          const targetWorldPos = new THREE.Vector3();
+          const targetWorldQuat = new THREE.Quaternion();
+          const targetWorldScale = new THREE.Vector3();
+
+          if (this.isTracking) {
+            // 1. STICK TO PAPER: Copy Paper's World Position
+            this.targetEl.object3D.getWorldPosition(targetWorldPos);
+            this.targetEl.object3D.getWorldQuaternion(targetWorldQuat);
+            this.targetEl.object3D.getWorldScale(targetWorldScale);
+
+            this.modelEl.object3D.position.copy(targetWorldPos);
+            this.modelEl.object3D.quaternion.copy(targetWorldQuat);
+            // We use a fixed scale or the target scale
+            this.modelEl.object3D.scale.set(0.5, 0.5, 0.5); 
+          } else {
+            // 2. STICK TO SCREEN: Copy Camera Position + Offset
+            // MindAR Camera is always at 0,0,0, looking down -Z
+            this.modelEl.object3D.position.set(0, 0, -1); // 1 meter in front
+            this.modelEl.object3D.rotation.set(0, 0, 0);  // Face user
+            this.modelEl.object3D.scale.set(0.5, 0.5, 0.5);
+          }
+          
+          // Absolute override to ensure it never disappears
+          this.modelEl.object3D.visible = true;
         }
       });
 
-      // 2. TOUCH CONTROLS (Rotation and Zoom)
+      // TOUCH CONTROLS
       AFRAME.registerComponent('touch-handler', {
-        schema: {
-          minScale: { default: 0.1 },  
-          maxScale: { default: 10.0 },  
-          rotationFactor: { default: 5 } 
-        },
         init: function () {
-          this.initialScale = this.el.object3D.scale.clone();
-          this.scaleFactor = 1;
           this.isDragging = false;
           this.previousTouch = null;
-          this.initialDistance = null;
+          this.scaleFactor = 1;
 
           document.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
-
-          window.addEventListener('touchstart', this.onTouchStart.bind(this));
-          window.addEventListener('touchmove', this.onTouchMove.bind(this));
-          window.addEventListener('touchend', this.onTouchEnd.bind(this));
-        },
-        onTouchStart: function (e) {
-          if (e.touches.length === 1) {
-            this.isDragging = true;
-            this.previousTouch = { x: e.touches[0].screenX, y: e.touches[0].screenY };
-          } else if (e.touches.length === 2) {
-            this.isDragging = false;
-            this.initialDistance = this.getDistance(e.touches);
-          }
-        },
-        onTouchMove: function (e) {
-          if (e.touches.length === 1 && this.isDragging) {
-            let deltaX = e.touches[0].screenX - this.previousTouch.x;
-            let deltaY = e.touches[0].screenY - this.previousTouch.y;
-            this.el.object3D.rotation.y += deltaX * 0.01 * this.data.rotationFactor;
-            this.el.object3D.rotation.x += deltaY * 0.01 * this.data.rotationFactor;
-            this.previousTouch = { x: e.touches[0].screenX, y: e.touches[0].screenY };
-          } else if (e.touches.length === 2) {
-            let currentDistance = this.getDistance(e.touches);
-            if (this.initialDistance) {
-              let zoomFactor = currentDistance / this.initialDistance;
-              this.scaleFactor *= zoomFactor;
-              this.scaleFactor = Math.max(this.data.minScale, Math.min(this.data.maxScale, this.scaleFactor));
-              this.el.object3D.scale.set(
-                this.initialScale.x * this.scaleFactor,
-                this.initialScale.y * this.scaleFactor,
-                this.initialScale.z * this.scaleFactor
-              );
+          window.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+              this.isDragging = true;
+              this.previousTouch = { x: e.touches[0].screenX, y: e.touches[0].screenY };
             }
-            this.initialDistance = currentDistance;
-          }
-        },
-        onTouchEnd: function () {
-          this.initialDistance = null;
-          this.isDragging = false;
-        },
-        getDistance: function (touches) {
-          let dx = touches[0].screenX - touches[1].screenX;
-          let dy = touches[0].screenY - touches[1].screenY;
-          return Math.sqrt(dx * dx + dy * dy);
+          });
+          window.addEventListener('touchmove', (e) => {
+            if (this.isDragging && e.touches.length === 1) {
+              let deltaX = e.touches[0].screenX - this.previousTouch.x;
+              let deltaY = e.touches[0].screenY - this.previousTouch.y;
+              this.el.object3D.rotation.y += deltaX * 0.01;
+              this.el.object3D.rotation.x += deltaY * 0.01;
+              this.previousTouch = { x: e.touches[0].screenX, y: e.touches[0].screenY };
+            }
+          });
+          window.addEventListener('touchend', () => { this.isDragging = false; });
         }
       });
     </script>
+    
+    <style>
+        /* Extra insurance to hide MindAR overlays */
+        .mindar-ui-scanning, .mindar-ui-overlay { display: none !important; }
+    </style>
   </head>
 
   <body>
     <a-scene 
-      mindar-image="imageTargetSrc: ./targets.mind; filterMinCF: 0.0001; filterBeta: 0.001;" 
+      mindar-image="imageTargetSrc: ./targets.mind; autoStart: true; uiScanning: no;" 
       color-space="sRGB" 
       renderer="colorManagement: true, physicallyCorrectLights" 
       vr-mode-ui="enabled: false" 
@@ -127,14 +112,12 @@
 
       <a-camera id="camera" position="0 0 0" look-controls="enabled: false"></a-camera>
 
-      <!-- The target starts with the model inside so the initial scan is reliable -->
-      <a-entity id="target" mindar-image-target="targetIndex: 0">
-        <a-gltf-model id="model" src="#ct-scan" 
-                      position="0 0 0" 
-                      scale="1 1 1" 
-                      ar-manager 
-                      touch-handler>
-        </a-gltf-model>
+      <!-- The target is now just an invisible reference point -->
+      <a-entity id="target" mindar-image-target="targetIndex: 0"></a-entity>
+
+      <!-- The model is OUTSIDE the target, attached directly to the scene -->
+      <a-entity id="model-anchor" ar-bridge visible="false">
+        <a-gltf-model src="#ct-scan" touch-handler></a-gltf-model>
       </a-entity>
 
     </a-scene>
