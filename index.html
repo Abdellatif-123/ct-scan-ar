@@ -7,18 +7,29 @@
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
 
     <script>
-      // 1. UPDATED: SCRIPT TO KEEP THE MODEL VISIBLE (Forces it every frame)
+      // 1. SCRIPT TO KEEP THE MODEL VISIBLE AND STOP THE SCANNING UI
       AFRAME.registerComponent('always-visible', {
         init: function () {
           this.isFound = false;
           
-          // Wait until the camera sees the image for the very first time
           this.el.addEventListener('targetFound', () => {
             this.isFound = true;
+            
+            // THE FIX: Inject custom CSS to permanently hide MindAR's 
+            // scanning brackets and dark overlay once the image is found!
+            if (!document.getElementById('hide-mindar-ui')) {
+              const style = document.createElement('style');
+              style.id = 'hide-mindar-ui';
+              style.innerHTML = `
+                .mindar-ui-scanning { display: none !important; }
+                .mindar-ui-overlay { display: none !important; }
+              `;
+              document.head.appendChild(style);
+            }
           });
         },
         tick: function () {
-          // If it has been found, OVERRIDE MindAR and force it to stay visible
+          // Force the model to stay visible
           if (this.isFound) {
             this.el.object3D.visible = true;
           }
@@ -92,7 +103,7 @@
   </head>
 
   <body>
-    <!-- The camera and lighting setup -->
+    <!-- Setup AR Scene -->
     <a-scene 
       mindar-image="imageTargetSrc: ./targets.mind; filterMinCF: 0.0001; filterBeta: 0.001;" 
       color-space="sRGB" 
@@ -107,10 +118,9 @@
 
       <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-      <!-- The target now has "always-visible" -->
       <a-entity mindar-image-target="targetIndex: 0" always-visible>
         
-        <!-- The 3D model now has "touch-handler" -->
+        <!-- The 3D model with Touch Controls attached -->
         <a-gltf-model src="#ct-scan" position="0 0 0" scale="1 1 1" touch-handler></a-gltf-model>
         
       </a-entity>
