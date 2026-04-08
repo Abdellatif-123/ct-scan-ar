@@ -1,37 +1,122 @@
 <html>
   <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- We added user-scalable=no so the web browser doesn't zoom the whole webpage when you pinch -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
     <title>CT Scan AR</title>
+    
     <!-- Load A-Frame and MindAR -->
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
+
+    <script>
+      // 1. SCRIPT TO KEEP THE MODEL VISIBLE WHEN THE IMAGE IS LOST
+      AFRAME.registerComponent('always-visible', {
+        init: function () {
+          // Listen for when MindAR loses sight of the target image
+          this.el.addEventListener('targetLost', () => {
+            // Force the model to stay visible on the screen
+            this.el.setAttribute('visible', true);
+          });
+        }
+      });
+
+      // 2. SCRIPT TO HANDLE 1-FINGER ROTATE AND 2-FINGER ZOOM
+      AFRAME.registerComponent('touch-handler', {
+        schema: {
+          minScale: { default: 0.1 },  // Smallest zoom
+          maxScale: { default: 5.0 },  // Largest zoom
+          rotationFactor: { default: 5 } // Speed of rotation
+        },
+        init: function () {
+          this.initialScale = this.el.object3D.scale.clone();
+          this.scaleFactor = 1;
+          this.isDragging = false;
+          this.previousTouch = null;
+          this.initialDistance = null;
+
+          // Prevent the webpage from scrolling when you swipe the screen
+          document.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+
+          // Listen for screen touches
+          window.addEventListener('touchstart', this.onTouchStart.bind(this));
+          window.addEventListener('touchmove', this.onTouchMove.bind(this));
+          window.addEventListener('touchend', this.onTouchEnd.bind(this));
+        },
+        onTouchStart: function (e) {
+          if (e.touches.length === 1) {
+            // 1 Finger: Get ready to rotate
+            this.isDragging = true;
+            this.previousTouch = { x: e.touches[0].screenX, y: e.touches[0].screenY };
+          } else if (e.touches.length === 2) {
+            // 2 Fingers: Get ready to zoom
+            this.isDragging = false;
+            this.initialDistance = this.getDistance(e.touches);
+          }
+        },
+        onTouchMove: function (e) {
+          if (e.touches.length === 1 && this.isDragging) {
+            // 1 Finger moving: Rotate the model
+            let deltaX = e.touches[0].screenX - this.previousTouch.x;
+            let deltaY = e.touches[0].screenY - this.previousTouch.y;
+            
+            // Apply rotation to the 3D object
+            this.el.object3D.rotation.y += deltaX * 0.01 * this.data.rotationFactor;
+            this.el.object3D.rotation.x += deltaY * 0.01 * this.data.rotationFactor;
+            
+            this.previousTouch = { x: e.touches[0].screenX, y: e.touches[0].screenY };
+          } else if (e.touches.length === 2) {
+            // 2 Fingers moving: Zoom the model
+            let currentDistance = this.getDistance(e.touches);
+            if (this.initialDistance) {
+              let zoomFactor = currentDistance / this.initialDistance;
+              this.scaleFactor *= zoomFactor;
+              
+              // Prevent zooming in or out too much
+              this.scaleFactor = Math.max(this.data.minScale, Math.min(this.data.maxScale, this.scaleFactor));
+              
+              // Apply scale to the 3D object
+              this.el.object3D.scale.x = this.initialScale.x * this.scaleFactor;
+              this.el.object3D.scale.y = this.initialScale.y * this.scaleFactor;
+              this.el.object3D.scale.z = this.initialScale.z * this.scaleFactor;
+            }
+            this.initialDistance = currentDistance;
+          }
+        },
+        onTouchEnd: function (e) {
+          if (e.touches.length < 2) { this.initialDistance = null; }
+          if (e.touches.length === 0) { this.isDragging = false; }
+        },
+        getDistance: function (touches) {
+          // Math to calculate distance between two fingers
+          let dx = touches[0].screenX - touches[1].screenX;
+          let dy = touches[0].screenY - touches[1].screenY;
+          return Math.sqrt(dx * dx + dy * dy);
+        }
+      });
+    </script>
   </head>
+
   <body>
-    <!-- Setup the AR Scene -->
     <a-scene 
-  mindar-image="imageTargetSrc: ./targets.mind; filterMinCF: 0.0001; filterBeta: 0.001;" 
-  color-space="sRGB" 
-  renderer="colorManagement: true, physicallyCorrectLights" 
-  vr-mode-ui="enabled: false" 
-  device-orientation-permission-ui="enabled: false"
-  gltf-model="dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/;">
+      mindar-image="imageTargetSrc: ./targets.mind; filterMinCF: 0.0001; filterBeta: 0.001;" 
+      color-space="sRGB" 
+      renderer="colorManagement: true, physicallyCorrectLights" 
+      vr-mode-ui="enabled: false" 
+      device-orientation-permission-ui="enabled: false"
+      gltf-model="dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/;">
       
-      <!-- Load your 3D Asset -->
       <a-assets>
-        <a-asset-item id="ct-scan" src="./abed.glb"></a-asset-item>
+        <!-- Ensure this matches your exact file name -->
+        <a-asset-item id="ct-scan" src="./ct_model.glb"></a-asset-item>
       </a-assets>
 
       <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-      <!-- Attach the 3D model to the Image Target -->
-      <!-- 'targetIndex: 0' means the first image you uploaded to the compiler -->
-      <a-entity mindar-image-target="targetIndex: 0">
+      <!-- 1. We added the "always-visible" script to the image target -->
+      <a-entity mindar-image-target="targetIndex: 0" always-visible>
         
-        <!-- Here we place the model. You may need to change scale and rotation depending on how it exported from Blender -->
-        <a-box position="0 0 0" scale="0.1 0.1 0.1" color="red"></a-box> 
-        <a-gltf-model src="#ct-scan" position="0 0 0" scale="1  1  1" rotation="45 90 0" 
-          animation="property: rotation; to: 0 720 0; loop: true; dur: 20000; easing: linear;"
-          ></a-gltf-model>
+        <!-- 2. We added the "touch-handler" script to the 3D model -->
+        <a-gltf-model src="#ct-scan" position="0 0 0" scale="0.5 0.5 0.5" touch-handler></a-gltf-model>
         
       </a-entity>
     </a-scene>
